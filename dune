@@ -1,0 +1,9 @@
+(executable
+ (public_name k)
+ (modes byte exe)
+ (preprocess (pps sedlex.ppx)))
+
+(rule
+ (alias  runtest)
+ (deps end_to_end_test.k ansicolor.k)
+ (action (run %{exe:k.exe} end_to_end_test.k)))

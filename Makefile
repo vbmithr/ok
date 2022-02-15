@@ -1,12 +1,7 @@
-.PHONY: all clean k test-e2e
+.PHONY: all clean
 
-all: k
-
-k:
-	ocamlbuild k.native
+all:
+	dune build @install @runtest
 
 clean:
-	ocamlbuild -clean
-
-test-e2e:
-	echo "\\\\\\" | ./k.native end_to_end_test.k
+	dune clean

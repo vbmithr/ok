@@ -191,7 +191,7 @@ and kchar_prj = function KChar x->x|_->raise KError_type
 and ksymbol_prj = function KSymbol x->x|_->raise KError_type
 and kdictionary_prj = function KDictionary x->x|_->raise KError_type
 
-[@@inline always] let len = Array.length
+[@@inline always] let len x = Array.length x
 [@@inline always] let id x = x
 [@@inline always] let const x _ = x
 
@@ -324,7 +324,7 @@ let s_k = s "k" None let _ = dsetv (!ktree) s_k (KDictionary(!ktree_pwd))
 let ktree_env : d list ref = ref [!ktree_pwd]
 let ktree_pwdh : s list ref = ref [s_k]
 let ktree_set_pwdh h = ktree_pwdh:=(match h with HRel h -> !ktree_pwdh@h | HAbs h -> h)
-[@@inline always] let ktree_cd d = ktree_env:=(match !ktree_env with h::t -> d::t|[]->[d])
+[@@inline always] let ktree_cd d = ktree_env:=(match !ktree_env with _::t -> d::t|[]->[d])
 [@@inline always] let ktree_in d f = let p= !ktree_env in ktree_env:=d; let k = try f() with e -> (ktree_env:=p; raise e) in ktree_env:=p;k
 let kgetl_abs_exn h = dgetl_exn !ktree h
 let kgetl_rel_exn h =
@@ -394,11 +394,12 @@ let rec pp_k f = function
   | KSymbolArray [||] -> fpf f "0#`"
   | KSymbolArray [|s|] -> fpf f ","; pp_s f s
   | KSymbolArray a -> pp_a f pp_s a
+  | _ -> assert false
 and pp_de f = function
   | KList [|k;v|] -> fpf f "@[(%a;%a)@]" pp_k k pp_k v
   | KList [|k;v;a|] -> fpf f "@[(%a;%a;%a)@]" pp_k k pp_k v pp_k a
   | _ -> assert false
-let rec pp_h f = function
+let pp_h f = function
 | HRel ss -> pp_sep f ~sep:"." pp_sn (Array.of_list ss)
 | HAbs ss -> fpf f "."; pp_sep f ~sep:"." pp_sn (Array.of_list ss)
 let rec pp_e f = function
@@ -414,7 +415,7 @@ let rec pp_e f = function
 | EReturn e -> fpf f "@[:%a@]" pp_e e
 | ESeq (e,e') -> fpf f "@[%a;%a@]" pp_e e pp_e e'
 | EIfSimple (i,t,e) -> fpf f "@[:[%a;%a;%a]@]" pp_e i pp_e t pp_e e
-| EIfMulti (i,t,e) -> fpf f "@[if_multi@]"
+| EIfMulti (_i,_t,_e) -> fpf f "@[if_multi@]"
 | EAssign (h,e) -> fpf f "@[%a: %a@]" pp_h h pp_e e
 | EAssignMonad (h,e) -> fpf f "@[%a %a:@]" pp_h h pp_e e
 | EAssignDyad (h,e,e') -> fpf f "@[%a %a: %a@]" pp_h h pp_e e pp_e e'
@@ -449,7 +450,6 @@ let pp_c f = function
   | CWsSize -> fpf f "@[\\w@]"
 let pp_cs f cs = List.iter (pp_c f) cs
 (* stdlib / utilities ====================================================== *)
-[@@inline always] let some x = Some x
 let int_of_string s = try int_of_string s with Failure _ -> raise KError_domain
 let float_of_string s = try float_of_string s with Failure _ -> raise KError_domain
 let is_empty = function [] -> true | _ -> false
@@ -542,7 +542,7 @@ let areduce t ~f = let n = len t in
 let areduce_map t ~f ~g = let n = len t in
   if n = 0 then raise KError_length
   else (let r = ref (g t.(0)) in for i = 1 to n - 1 do r := f !r (g t.(i)) done;!r)
-[@@inline always] let azip_map f (x:'a array) (y:'b array) =
+[@@inline always] let azip_map f x y =
   let n = len x in if n <> len y then raise KError_length
   else Array.init n (fun i -> f x.(i) y.(i))
 let azip_map_r g f = azip_map (comp_r f g)
@@ -617,6 +617,7 @@ let rec kcopy_deep_box d = match d with (* PERF *)
   | KSymbolArray x -> KList (amap x ksymbol)
   | KList x -> KList (amap x kcopy_deep_box)
   | KNil | KFunction _  | KInteger _ | KFloat _ | KChar _ | KSymbol _ -> d
+  | _ -> assert false
 and dcopy_deep_box d = let d = dcopy d in
     H.iter (fun k {value;attr} -> dset d k {
       value = kcopy_deep_box value;
@@ -647,7 +648,8 @@ let as_list = function
   | KList x -> x
   | x -> [|x|]
 let sub a pos len = Array.sub a pos len
-let explode s = Array.init (Bytes.length s) (fun i -> s.[i])
+let explode s = Array.init (Bytes.length s) (fun i -> Bytes.get s i)
+let explode_str s = Array.init (String.length s) (fun i -> String.get s i)
 let adrop x y = let n = len y in let p,l = if x >= 0 then x,n-x else 0,n+x in sub y p l
 let acut x y f = let n = len y in
   let p, a = afoldl x ~init:(0,[]) ~f:(fun (p,xs) x ->  if x-p>0 then (x,f (sub y p (x-p))::xs) else (x,xs)) in
@@ -667,6 +669,7 @@ let rec shape x = match x with
           acc := current::!acc
         done with Exit -> ());
       Array.of_list (n::List.rev !acc)
+  | _ -> assert false
 let kvec xs =
   let int = ref 0 and char = ref 0 and float = ref 0 and symbol = ref 0 in
   try let n = len xs in if n = 0 then raise Exit else for i = 0 to n-1 do
@@ -781,7 +784,7 @@ let list_of_kap n ks is = let x = Array.make n KNil in aiter2 (fun k i -> x.(i) 
 let k_of_kargs = function
   | Ka0 -> KNil | Ka1 x -> x
   | Ka2 (x,y) -> kvec [|x;y|] | Ka3 (x,y,z) -> kvec [|x;y;z|] | Ka xs -> kvec xs
-  | Kap (n,ks,is,js) -> KList (list_of_kap n ks is)
+  | Kap (n,ks,is,_js) -> KList (list_of_kap n ks is)
 let klist_of_kargs = function
   | Ka0 -> KNil | Ka1 x -> KList [|x|] | Ka2 (x,y) -> KList [|x;y|] | Ka3 (x,y,z) -> KList [|x;y;z|] | Ka x -> KList x
   | Kap (n,ks,is,_) ->  KList (list_of_kap n ks is)
@@ -823,7 +826,7 @@ let pnames = sep_token1 DOT tname |>> fun l -> (String.concat "." l, List.map (f
 let phandle = choice [t DOT |>^ pnames |>> (fun (x,h) -> "."^x,HAbs h);pnames |>> (fun (x,h) -> x,HRel h)]
 let parse_symbol s =
     let rec tokenize b ts = match Lexer.read b with EOF-> array_of_list_rev (EOF::ts) |t->tokenize b (t::ts) in
-    let tokens = tokenize (Lexing.from_string s) [] in fst (phandle {tokens;pos=0})
+    let tokens = tokenize (Sedlexing.Latin1.from_string s) [] in fst (phandle {tokens;pos=0})
 end include Symbol_parser
 
 (* adverbs ================================================================= *)
@@ -943,7 +946,7 @@ let rec atomic_d f x y = match is_atom x,is_atom y with
   | KFloat n, KFloat m -> KFloat (f_float n m)
   | KInteger n, KFloat m -> KFloat (f_float (float_of_int n) m)
   | KFloat n, KInteger m -> KFloat (f_float n (float_of_int m))
-  | x,y -> raise KError_type)
+  | _x,_y -> raise KError_type)
 [@@inline always] let not_atomic_m ~f_int ~f_float ~f_sym ~f_char ~f_k = function
   | KIntegerArray xs -> f_int xs
   | KFloatArray xs -> f_float xs
@@ -1026,8 +1029,9 @@ let vexclaim_m = function
   | KInteger _ -> raise KError_domain
   | KList _ -> raise KError_domain
   | KDictionary d -> KSymbolArray (dkeys d)
-  | KSymbol s -> try (match kgets_exn s with KDictionary d -> KSymbolArray (dkeys d) |_->KNil) with Not_found -> KNil
+  | KSymbol s -> (try (match kgets_exn s with KDictionary d -> KSymbolArray (dkeys d) |_->KNil) with Not_found -> KNil)
   | _ -> raise KError_type
+
 let vpercent = float_atomic_d (/.)
 let vpercent_m = num_atomic_m ~f_int:(fun x -> kfloat @@ 1.0/.(float_of_int x))
                               ~f_float:(fun x -> kfloat @@ 1.0/.x)
@@ -1108,7 +1112,7 @@ let vcomma_m x = match x with (* enlist *)
 let rec int_pow a = function
   | 0 -> 1 | 1 -> a | n -> let b = int_pow a (n / 2) in b * b * (if n mod 2 = 0 then 1 else a)
 let vcircumflex = num_atomic_d ~f_int:int_pow ~f_float:( ** )
-let rec vcircumflex_m x = KIntegerArray (shape x)
+let vcircumflex_m x = KIntegerArray (shape x)
 let vlangle = atomic_d (fun x y -> match x,y with
   | KInteger n, KInteger m -> KInteger (if n<m then 1 else 0)
   | KInteger n, KFloat m -> KInteger (if (float_of_int n)<m then 1 else 0)
@@ -1191,7 +1195,7 @@ let vtilde x y = KInteger (if x=y then 1 else 0) (* match *)
 let vtilde_m = atomic_m (function (* not / attribute *)
   | KInteger x -> KInteger (if x=0 then 1 else 0)
   | KFloat x -> KInteger (if x=0.0 then 1 else 0)
-  | KSymbol s -> raise Not_implemented_attribute (* attribute *)
+  | KSymbol _s -> raise Not_implemented_attribute (* attribute *)
   | _ -> raise KError_type)
 let vdollar _ _ = raise Not_implemented_format (* format / form *)
 let vdollar_m = atomic_m (fun k -> KCharArray (explode (fps (fun f -> pp_k f k)))) (* format *)
@@ -1311,11 +1315,11 @@ let rec vdot x y = match x,y with (* apply / index / of *)
   | KFunction f,    KList [|x;y|]      -> (fdyad_prj f) x y
   | KFunction f,    KList [|x;y;z|]    -> (ftriad_prj f) x y z
   | KFunction f,    KList [|x;y;z;u|]  -> (ftetrad_prj f) x y z u
-  | KFunction f,    KIntegerArray y    -> vdot x (klist(amap y kinteger))
-  | KFunction f,    KCharArray y       -> vdot x (klist(amap y kchar))
-  | KFunction f,    KFloatArray y      -> vdot x (klist(amap y kfloat))
-  | KFunction f,    KSymbolArray y     -> vdot x (klist(amap y ksymbol))
-  | KFunction f,    _                  -> (kfmonad_prj x) y
+  | KFunction _f,    KIntegerArray y    -> vdot x (klist(amap y kinteger))
+  | KFunction _f,    KCharArray y       -> vdot x (klist(amap y kchar))
+  | KFunction _f,    KFloatArray y      -> vdot x (klist(amap y kfloat))
+  | KFunction _f,    KSymbolArray y     -> vdot x (klist(amap y ksymbol))
+  | KFunction _f,    _                  -> (kfmonad_prj x) y
   | KSymbol s,      _                  -> (try vdot (kgets_exn s) y with Not_found -> KNil)
   | _,(KChar _|KFloat _|KCharArray _|KFloatArray _|KDictionary _) -> raise KError_type
   | _,(KNil|KIntegerArray[||]|KSymbolArray[||]|KList[||]) -> x
@@ -1335,7 +1339,7 @@ let vdot_m = function (* make/unmake dictionary *)
   | KList xs -> KDictionary (dmakel xs)
   | KSymbol s -> (try kgets_exn s with Not_found -> KNil)
   | _ -> raise KError_type
-let rec vdot_t_aux d i f = (* PERF; FIXME: assuming f is pure *)
+let vdot_t_aux d i f = (* PERF; FIXME: assuming f is pure *)
   let i = match i with
   | KList x -> x | KIntegerArray i -> amap i kinteger | KSymbolArray i -> amap i ksymbol
   | KCharArray _ | KFloatArray _ | KDictionary _ ->  raise KError_type
@@ -1343,7 +1347,7 @@ let rec vdot_t_aux d i f = (* PERF; FIXME: assuming f is pure *)
   | _ -> raise KError_rank in
   let n = len i in let rec loop d h t = (* invariant: d is either a list or a dict, and mutating it is the right thing to do *)
     if h = KNil && t < n then (match d with
-      | KDictionary d -> H.iter (fun k {value;attr} -> loop value i.(t) (t+1)) d
+      | KDictionary d -> H.iter (fun _k {value;attr=_} -> loop value i.(t) (t+1)) d
       | KList d -> let m = len d in for j = 0 to m-1 do loop d.(j) i.(t) (t+1); done
       | _ -> assert false)
     else if h = KNil && t = n then (match d with
@@ -1357,14 +1361,15 @@ let rec vdot_t_aux d i f = (* PERF; FIXME: assuming f is pure *)
       | _ -> raise KError_type)
     else if is_atom h then (match d,h with
       | KList d, KInteger j -> loop d.(j) i.(t) (t+1)
-      | KDictionary d, KSymbol s -> loop (dgetv_or_nil d s) i.(t) (t+1))
+      | KDictionary d, KSymbol s -> loop (dgetv_or_nil d s) i.(t) (t+1)
+      | _ -> assert false)
       else kiter_with (fun i -> loop d i t) h in
   loop d i.(0) 1; kvec_deep d
 let vdot_t_assign h i f = ksethv_ret h (vdot_t_aux (kcopy_deep_box @@ try kgeth_exn h with Not_found -> raise KError_domain) i f)
 let vdot_t d i f = let f = kfmonad_prj f in match d with (* amend (triad) *)
   | KSymbol s -> ksetsv_ret s (vdot_t_aux (kcopy_deep_box @@ try kgets_exn s with Not_found -> raise KError_domain) i f)
   | _ -> vdot_t_aux (kcopy_deep_box d) i f
-let rec vdot_q_aux d i f y = (* PERF; UGLY *)
+let vdot_q_aux d i f y = (* PERF; UGLY *)
   let i = match i with
   | KList x -> x | KIntegerArray i -> amap i kinteger | KSymbolArray i -> amap i ksymbol
   | KCharArray _ | KFloatArray _ | KDictionary _ ->  raise KError_type
@@ -1372,7 +1377,7 @@ let rec vdot_q_aux d i f y = (* PERF; UGLY *)
   | _ -> raise KError_rank in
   let n = len i in let rec loop d h t y =
     if h = KNil && t < n then (match d with
-        | KDictionary d -> kaiter_with (fun y k -> let {value;attr} = dget_exn d k in loop value i.(t) (t+1) y) y (dkeys d)
+        | KDictionary d -> kaiter_with (fun y k -> let {value;attr=_} = dget_exn d k in loop value i.(t) (t+1) y) y (dkeys d)
         | KList d -> kaiter_with (fun y d -> loop d i.(t) (t+1) y) y d
         | _ -> assert false)
     else if h = KNil && t = n then (match d with
@@ -1394,7 +1399,7 @@ let vdot_q d i f y = let f = kfdyad_prj f in match d with (* amend (tetrad) *)
 (* i/o verbs =============================================================== *)
 let unmarshal_symbol x = let x,h = parse_symbol x in s x (match h with HRel _ -> None | _ -> Some h)
 let rec marshal_dict d =
-  Array.map(fun (KList[|KSymbol s;v;a|])->sname s,marshal_symbols v,match a with KNil -> a|KDictionary d->KSDictionary (marshal_dict d))(dvalues d)
+  Array.map (function (KList[|KSymbol s;v;a|]) ->sname s,marshal_symbols v,(match a with KNil -> a|KDictionary d->KSDictionary (marshal_dict d)|_ -> assert false)|_ ->assert false) (dvalues d)
 and marshal_symbols k = kmap_rec (function
   | KSymbol x -> KSSymbol (sname x)
   | KSymbolArray x -> KSSymbolArray (amap x sname)
@@ -1415,14 +1420,14 @@ let load_file_text_lines f ch = let acc = ref [] in
   with End_of_file -> array_of_list_rev !acc
 let write_file_text_lines f ls =
   let ch = open_out f and n = len ls in
-  for i=0 to n-1 do let lsi = ls.(i) in output_bytes ch (String.init (len lsi) (Array.get lsi));output_char ch '\n'; done; close_out ch
+  for i=0 to n-1 do let lsi = ls.(i) in output_string ch (String.init (len lsi) (Array.get lsi));output_char ch '\n'; done; close_out ch
 let string_value = function
   KSymbol s -> sname s | KChar c -> String.make 1 c | KCharArray c -> String.init (len c) (fun i -> c.(i)) | _ -> raise KError_type
 let trim_quoted s = let n = String.length s in if n>0&&s.[0]='"'&&s.[n-1]='"' then String.sub s 1 (n-2) else s
 let parse_field = function
   |'I' -> comp4 some kinteger int_of_string String.trim
   |'F' -> comp4 some kfloat float_of_string String.trim
-  |'C' -> comp4 some kchararray explode (comp trim_quoted String.trim)
+  |'C' -> comp4 some kchararray explode_str (comp trim_quoted String.trim)
   |'S' -> comp4 some ksymbol (flip s None) (comp trim_quoted String.trim)
   |' ' -> const None
   | _ -> raise KError_domain
@@ -1443,7 +1448,7 @@ let parse_delimited_fields (t:char array) (s:char) (m:int) (l:string) =
     (match t.(j) (String.sub l !i (k - !i)) with None -> () | Some x -> a.(j) <- x | exception KError_domain -> ());
     i := k+1;
   done with Exit -> ()); a
-let vzero_colon_m x = KList (with_file_in (string_value x) (load_file_text_lines (comp kchararray explode)))
+let vzero_colon_m x = KList (with_file_in (string_value x) (load_file_text_lines (comp kchararray explode_str)))
 let vzero_colon_aux_fw t w ch =
   let m = afoldl ~init:0 ~f:(fun n c -> if c=' ' then n else n+1) t in
   if m <> len w then raise KError_length;
@@ -1470,9 +1475,9 @@ let vzero_colon x y = match x,y with (* PERF: load column-wise, not row-wise + t
       let m = afoldl ~init:0 ~f:(fun n c -> if c=' ' then n else n+1) t in
       let header = parse_delimited_fields (amap t (function ' '->' '|_->'S')) s m (input_line ch)
       and cols = vzero_colon_aux_d t s ch in [|kvec header;KList cols|])
-  | KList [|s;w|], KList [|f;b;n|] -> raise Not_implemented_io (* TODO: offset+length args *)
+  | KList [|_s;_w|], KList [|_f;_b;_n|] -> raise Not_implemented_io (* TODO: offset+length args *)
   | _ -> raise KError_type
-let vone_colon_m x = raise Not_implemented_io
+let vone_colon_m _x = raise Not_implemented_io
 let vone_colon x y =
   let f = ensure_suffix ".L" (string_value x) in
   let ch = try open_out_bin f with Sys_error _-> raise KError_domain in
@@ -1571,14 +1576,14 @@ let eval_adverb av f = match av,f with (* TODO: once we have n-ary adverbs, this
   | AVBackslash, (FMonadDyad (_,f) | FMonadDyadTriad (_,f,_) | FMonadDyadTriadTetrad (_,f,_,_)) -> FMonadDyad(scan_dm f,scan_dd f)
   | AVBackslash, FMonad f -> FMonadDyad(scan_mm f,scan_md f)
   | AVBackslash, _ -> raise KError_valence
-  | AVBackslashColon, FMonad f -> raise KError_valence
+  | AVBackslashColon, FMonad _f -> raise KError_valence
   | AVBackslashColon, (FDyad f|FMonadDyad(_,f)|FMonadDyadTriad(_,f,_)|FMonadDyadTriadTetrad(_,f,_,_)) -> FDyad(each_left_dd f)
   | AVBackslashColon, _ -> raise KError_valence
   | AVQuote, FMonad f -> FMonad(each_mm f)
   | AVQuote, FDyad f -> FDyad(each_dd f)
   | AVQuote, (FMonadDyad(fm,fd)|FMonadDyadTriad(fm,fd,_)|FMonadDyadTriadTetrad(fm,fd,_,_)) -> FMonadDyad(each_mm fm,each_dd fd)
   | AVQuote, _ -> raise KError_valence
-  | AVQuoteColon, FMonad f -> raise KError_valence
+  | AVQuoteColon, FMonad _f -> raise KError_valence
   | AVQuoteColon, (FDyad f|FMonadDyad (_,f)|FMonadDyadTriad (_,f,_)|FMonadDyadTriadTetrad (_,f,_,_)) -> FMonad(each_pair_dm f)
   | AVQuoteColon, _ -> raise KError_valence
 let eval_app f args = (* UGLY *)
@@ -1589,7 +1594,7 @@ let eval_app f args = (* UGLY *)
   | FMonad _,                         _                     -> raise KError_valence
   | FMonadDyad (fm,_),                Ka1 x                 -> fm x
   | FMonadDyad (_,fd),                Ka2 (x,y)             -> fd x y
-  | FMonadDyad (_,fd),                Kap (2,ks,is,js)      -> partial_app_dyad fd ks is
+  | FMonadDyad (_,fd),                Kap (2,ks,is,_js)      -> partial_app_dyad fd ks is
   | FMonadDyad _,                     _                     -> raise KError_valence
   | FDyad f,                          Ka2 (x,y)             -> f x y
   | FDyad f,                          Ka1 x                 -> KFunction (FMonad (f x))
@@ -1599,22 +1604,22 @@ let eval_app f args = (* UGLY *)
   | FMonadDyadTriad (_,fd,_),         Ka2 (x,y)             -> fd x y
   | FMonadDyadTriad (_,_,ft),         Ka3 (x,y,z)           -> ft x y z
   | FMonadDyadTriad (_,fd,_),         Kap (2,ks,is,_)       -> partial_app_dyad fd ks is
-  | FMonadDyadTriad (_,_,ft),         Kap (3,ks,is,js)      -> partial_app_triad ft ks is
+  | FMonadDyadTriad (_,_,ft),         Kap (3,ks,is,_js)      -> partial_app_triad ft ks is
   | FMonadDyadTriad _,        _                             -> raise KError_valence
   | FMonadDyadTriadTetrad (fm,_,_,_), Ka1 x                 -> fm x
   | FMonadDyadTriadTetrad (_,fd,_,_), Ka2 (x,y)             -> fd x y
   | FMonadDyadTriadTetrad (_,_,ft,_), Ka3 (x,y,z)           -> ft x y z
   | FMonadDyadTriadTetrad (_,_,_,fq), Ka [|x;y;z;u|]        -> fq x y z u
   | FMonadDyadTriadTetrad (_,fd,_,_), Kap (2,ks,is,_)       -> partial_app_dyad fd ks is
-  | FMonadDyadTriadTetrad (_,_,ft,_), Kap (3,ks,is,js)      -> partial_app_triad ft ks is
-  | FMonadDyadTriadTetrad (_,_,_,fq), Kap (4,ks,is,js)      -> partial_app_tetrad fq ks is
+  | FMonadDyadTriadTetrad (_,_,ft,_), Kap (3,ks,is,_js)      -> partial_app_triad ft ks is
+  | FMonadDyadTriadTetrad (_,_,_,fq), Kap (4,ks,is,_js)      -> partial_app_tetrad fq ks is
   | FMonadDyadTriadTetrad _,          _                     -> raise KError_valence
   | FTriad f,                         Ka3 (x,y,z)           -> f x y z
   | FTriad f,                         Ka1 x                 -> KFunction (FDyad (f x))
   | FTriad f,                         Ka2 (x,y)             -> KFunction (FMonad (f x y))
-  | FTriad f,                         Kap ((2|3),ks,is,js)  -> partial_app_triad f ks is
+  | FTriad f,                         Kap ((2|3),ks,is,_js)  -> partial_app_triad f ks is
   | FTriad _,                         _                     -> raise KError_valence
-  | FNary (n,fn),                     Ka0                   -> KFunction f
+  | FNary (_n,_fn),                     Ka0                   -> KFunction f
   | FNary (n,fn),                     Ka1 x                 -> partial_app_nary_prefix fn n 1 [|x|]
   | FNary (n,fn),                     Ka2(x,y)              -> partial_app_nary_prefix fn n 2 [|x;y|]
   | FNary (n,fn),                     Ka3(x,y,z)            -> partial_app_nary_prefix fn n 3 [|x;y;z|]
@@ -1734,8 +1739,8 @@ let rec eval_command = function (* UGLY,FIXME: workspace save/load *)
   | CLoad f -> !eval_file f; KNil
   | CWsLoad None -> eval_command (CWsLoad (Some config.workspace_name))
   | CWsSave None -> eval_command (CWsSave (Some config.workspace_name))
-  | CWsSave (Some f) -> let fa=KCharArray(explode f) in let _ = vone_colon fa (kgeth_exn (HAbs [])) in config.workspace_name<-f; fa
-  | CWsLoad (Some f) -> let fa=KCharArray(explode f) in ktree:=kdictionary_prj(vtwo_colon_m fa);
+  | CWsSave (Some f) -> let fa=KCharArray(explode_str f) in let _ = vone_colon fa (kgeth_exn (HAbs [])) in config.workspace_name<-f; fa
+  | CWsLoad (Some f) -> let fa=KCharArray(explode_str f) in ktree:=kdictionary_prj(vtwo_colon_m fa);
                         let k=kdictionary_prj(kgeth_exn(HAbs[s_k]))
                         in ktree_env:=[k];ktree_pwd:=k;ktree_pwdh:=[s_k];config.workspace_name<-f;fa
   | CWsSize -> raise Not_implemented_builtins
@@ -1794,14 +1799,14 @@ let pnums = seq_fold_token ~init:(`I []) ~f:(fun acc x -> match acc, x with
     | `I[x] -> KInteger x | `I(x::xs) -> KIntegerArray (array_of_list_rev (x::xs))
     | `F[x] -> KFloat x | `F(x::xs) -> KFloatArray (array_of_list_rev (x::xs))
     |  _ -> fail()
-let pchars = tstring |>> (fun s -> match explode s with [|c|] -> KChar c | cs -> KCharArray cs)
+let pchars = tstring |>> (fun s -> match explode_str s with [|c|] -> KChar c | cs -> KCharArray cs)
 let pvector = choice [pnums; psymbols; pchars] |>> eliteral
 let padverbs init = seq_fold (tm adverb) ~init ~f:(flip eadverb)
 let ioverb = function INT 0->VZeroColon|INT 1->VOneColon|INT 2->VTwoColon|INT 3->VThreeColon|INT 4->VFourColon|INT 5->VFiveColon|_->fail()
 let pverb = choice[tm verb >>= (fun v -> choice[t COLON|>^return(EVerbMonadic v);return (EVerb v)]) >>= padverbs; tm ioverb |>> everb |^> t COLON]
 let pname = phandle |>> comp ename snd
 let psysname = tm (function SYSNAME i -> i |_->fail()) |>> fun h -> s h None
-let psysname_dyad = psysname |>> (fun n -> try let _=kfdyad_prj (eval_builtin n)in n with _->fail())
+let psysname_dyad = psysname |>> (fun n -> try let _ign=kfdyad_prj (eval_builtin n)in n with _->fail())
 let bracket x = tws LBRACKET |>^ x |^> tws RBRACKET
 let paren x = tws LPAREN |>^ x |^> tws RPAREN
 let brace x = tws LBRACE |>^ x |^> tws RBRACE
@@ -1867,11 +1872,11 @@ let parse_multiline ch  =
       else loop (t::acc) stack
     in loop acc stack in
   let rec loop acc stack =
-    let stack, acc = tokenize_multiline(Lexing.from_string(input_line ch)) acc stack in
+    let stack, acc = tokenize_multiline(Sedlexing.Latin1.from_string(input_line ch)) acc stack in
     if stack=[] then fst (phrase {tokens=array_of_list_rev acc;pos=0})
     else (if ch=stdin then Format.printf ">  "; Format.print_flush (); loop acc stack) in
   loop [] []
-let parse_many f ch = try while true do f (parse_multiline ch); done with End_of_file -> ()
+let parse_many f ch = try while true do let _ign = f (parse_multiline ch) in (); done with End_of_file -> ()
 let _ = eval_file := (fun f -> let h= !ktree_pwdh and pwd=(!ktree_pwd) and env=(!ktree_env) in let ch = open_in (ensure_suffix ".k" f) in
                       ignore(parse_many eval_command ch);close_in ch;ktree_env:=env;ktree_pwd:=pwd;ktree_pwdh:=h)
 (* REPL ==================================================================== *)
